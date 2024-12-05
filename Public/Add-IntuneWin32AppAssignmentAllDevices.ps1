@@ -39,16 +39,23 @@ function Add-IntuneWin32AppAssignmentAllDevices {
     .PARAMETER RestartNotificationSnooze
         Specify a count in minutes for snoozing the restart notification, if not specified the snooze functionality is now allowed.
 
+    .PARAMETER FilterName
+        Specify the name of an existing Filter.
+
+    .PARAMETER FilterMode
+        Specify the filter mode of the specified Filter, e.g. Include or Exclude.
+
     .NOTES
         Author:      Nickolaj Andersen
         Contact:     @NickolajA
         Created:     2020-09-20
-        Updated:     2021-08-31
+        Updated:     2023-09-04
 
         Version history:
         1.0.0 - (2020-09-20) Function created
         1.0.1 - (2021-04-01) Updated token expired message to a warning instead of verbose output
         1.0.2 - (2021-08-31) Updated to use new authentication header
+        1.0.3 - (2023-09-04) Updated with Test-AccessToken function
     #>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -89,18 +96,26 @@ function Add-IntuneWin32AppAssignmentAllDevices {
 
         [parameter(Mandatory = $false, HelpMessage = "Specify the device restart grace period in minutes.")]
         [ValidateNotNullOrEmpty()]
-        [ValidateRange("1", "20160")]
+        [ValidateRange(1, 20160)]
         [int]$RestartGracePeriod = 1440,
 
         [parameter(Mandatory = $false, HelpMessage = "Specify a count in minutes when the restart count down display box is shown.")]
         [ValidateNotNullOrEmpty()]
-        [ValidateRange("1", "240")]
+        [ValidateRange(1, 240)]
         [int]$RestartCountDownDisplay = 15,
         
         [parameter(Mandatory = $false, HelpMessage = "Specify a count in minutes for snoozing the restart notification, if not specified the snooze functionality is now allowed.")]
         [ValidateNotNullOrEmpty()]
-        [ValidateRange("1", "712")]
-        [int]$RestartNotificationSnooze = 240
+        [ValidateRange(1, 712)]
+        [int]$RestartNotificationSnooze = 240,
+
+        [parameter(Mandatory = $false, HelpMessage = "Specify the name of an existing Filter.")]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilterName,
+
+        [parameter(Mandatory = $false, HelpMessage = "Specify the filter mode of the specified Filter, e.g. Include or Exclude.")]
+        [ValidateSet("Include", "Exclude")]
+        [string]$FilterMode
     )
     Begin {
         # Ensure required authentication header variable exists
@@ -108,12 +123,8 @@ function Add-IntuneWin32AppAssignmentAllDevices {
             Write-Warning -Message "Authentication token was not found, use Connect-MSIntuneGraph before using this function"; break
         }
         else {
-            $TokenLifeTime = ($Global:AuthenticationHeader.ExpiresOn - (Get-Date).ToUniversalTime()).Minutes
-            if ($TokenLifeTime -le 0) {
+            if ((Test-AccessToken) -eq $false) {
                 Write-Warning -Message "Existing token found but has expired, use Connect-MSIntuneGraph to request a new authentication token"; break
-            }
-            else {
-                Write-Verbose -Message "Current authentication token expires in (minutes): $($TokenLifeTime)"
             }
         }
 
@@ -156,6 +167,25 @@ function Add-IntuneWin32AppAssignmentAllDevices {
         }        
     }
     Process {
+        # Get Filter object if parameter is passed on command line
+        if ($PSBoundParameters["FilterName"]) {
+            # Ensure Filter mode is lowercase
+            $FilterMode = $FilterMode.ToLower()
+
+            # Ensure a Filter exist by given name from parameter input
+            Write-Verbose -Message "Querying for specified Filter: $($FilterName)"
+            $AssignmentFilters = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceManagement/assignmentFilters" -Verbose
+            if ($AssignmentFilters -ne $null) {
+                $AssignmentFilter = $AssignmentFilters | Where-Object { $PSItem.displayName -eq $FilterName }
+                if ($AssignmentFilter -ne $null) {
+                    Write-Verbose -Message "Found Filter with display name '$($AssignmentFilter.displayName)' and id: $($AssignmentFilter.id)"
+                }
+                else {
+                    Write-Warning -Message "Could not find Filter with display name: '$($FilterName)'"
+                }
+            }
+        }
+
         # Retrieve Win32 app by ID from parameter input
         Write-Verbose -Message "Querying for Win32 app using ID: $($ID)"
         $Win32App = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($ID)" -Method "GET"
@@ -165,8 +195,8 @@ function Add-IntuneWin32AppAssignmentAllDevices {
             # Construct target assignment body
             $TargetAssignment = @{
                 "@odata.type" = "#microsoft.graph.allDevicesAssignmentTarget"
-                "deviceAndAppManagementAssignmentFilterId" = $null
-                "deviceAndAppManagementAssignmentFilterType" = "none"
+                "deviceAndAppManagementAssignmentFilterId" = if ($AssignmentFilter -ne $null) { $AssignmentFilter.id } else { $null }
+                "deviceAndAppManagementAssignmentFilterType" = if ($AssignmentFilter -ne $null) { $FilterMode } else { "none" }
             } 
 
             # Construct table for Win32 app assignment body

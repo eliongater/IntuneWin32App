@@ -16,10 +16,12 @@ function New-IntuneWin32AppDependency {
         Author:      Nickolaj Andersen
         Contact:     @NickolajA
         Created:     2021-08-31
-        Updated:     2021-08-31
+        Updated:     2024-01-05
 
         Version history:
         1.0.0 - (2021-08-31) Function created
+        1.0.1 - (2023-09-04) Updated with Test-AccessToken function
+        1.0.2 - (2024-01-05) Fixed a type on the Test-AccessToken function implementation
     #>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -38,12 +40,8 @@ function New-IntuneWin32AppDependency {
             Write-Warning -Message "Authentication token was not found, use Connect-MSIntuneGraph before using this function"; break
         }
         else {
-            $TokenLifeTime = ($Global:AuthenticationHeader.ExpiresOn - (Get-Date).ToUniversalTime()).Minutes
-            if ($TokenLifeTime -le 0) {
+            if ((Test-AccessToken) -eq $false) {
                 Write-Warning -Message "Existing token found but has expired, use Connect-MSIntuneGraph to request a new authentication token"; break
-            }
-            else {
-                Write-Verbose -Message "Current authentication token expires in (minutes): $($TokenLifeTime)"
             }
         }
 

@@ -13,11 +13,14 @@ function Remove-IntuneWin32AppSupersedence {
         Author:      Nickolaj Andersen
         Contact:     @NickolajA
         Created:     2021-04-02
-        Updated:     2021-08-31
+        Updated:     2024-03-07
 
         Version history:
         1.0.0 - (2021-04-02) Function created
         1.0.1 - (2021-08-31) Updated to use new authentication header
+        1.0.2 - (2023-09-04) Updated with Test-AccessToken function. Updated to remove supersedence configuration and not include dependency configuration
+        1.0.3 - (2024-01-05) Fixed issue reported in #123, where the relationships table was not created correctly due a typo when creating an empty array
+        1.0.4 - (2024-03-07) Fixed a bug where the function would not handle empty dependencies correctly
     #>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -31,12 +34,8 @@ function Remove-IntuneWin32AppSupersedence {
             Write-Warning -Message "Authentication token was not found, use Connect-MSIntuneGraph before using this function"; break
         }
         else {
-            $TokenLifeTime = ($Global:AuthenticationHeader.ExpiresOn - (Get-Date).ToUniversalTime()).Minutes
-            if ($TokenLifeTime -le 0) {
+            if ((Test-AccessToken) -eq $false) {
                 Write-Warning -Message "Existing token found but has expired, use Connect-MSIntuneGraph to request a new authentication token"; break
-            }
-            else {
-                Write-Verbose -Message "Current authentication token expires in (minutes): $($TokenLifeTime)"
             }
         }
 
@@ -50,13 +49,17 @@ function Remove-IntuneWin32AppSupersedence {
         if ($Win32App -ne $null) {
             $Win32AppID = $Win32App.id
 
-            $Win32AppRelationships = [ordered]@{
-                "relationships" = @()
+            # Check for existing dependency relations for Win32 app, as these relationships should not be removed
+            $Dependencies = Get-IntuneWin32AppDependency -ID $Win32AppID
+
+            # Create relationships table to handle potential empty dependencies relations
+            $Win32AppRelationshipsTable = [ordered]@{
+                "relationships" = if ($Dependencies) { @($Dependencies) } else { , @() }
             }
 
             try {
                 # Attempt to call Graph and remove supersedence configuration for Win32 app
-                Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32AppID)/updateRelationships" -Method "POST" -Body ($Win32AppRelationships | ConvertTo-Json) -ErrorAction Stop
+                Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32AppID)/updateRelationships" -Method "POST" -Body ($Win32AppRelationshipsTable | ConvertTo-Json) -ErrorAction Stop
             }
             catch [System.Exception] {
                 Write-Warning -Message "An error occurred while removing supersedence configuration for Win32 app: $($Win32AppID). Error message: $($_.Exception.Message)"

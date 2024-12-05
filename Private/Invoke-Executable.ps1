@@ -6,31 +6,54 @@ function Invoke-Executable {
 
         [parameter(Mandatory = $false, HelpMessage = "Specify arguments that will be passed to the executable.")]
         [ValidateNotNull()]
-        [string]$Arguments
+        [string]$Arguments,
+
+        [parameter(Mandatory = $false, HelpMessage = "Specify whether standard output should be redirected.")]
+        [ValidateNotNull()]
+        [bool]$RedirectStandardOutput = $true,
+
+        [parameter(Mandatory = $false, HelpMessage = "Specify whether standard error output should be redirected.")]
+        [ValidateNotNull()]
+        [bool]$RedirectStandardError = $true,
+
+        [parameter(Mandatory = $false, HelpMessage = "Specify whether to create a new window for the executable.")]
+        [ValidateNotNull()]
+        [bool]$CreateNoWindow = $true,
+
+        [parameter(Mandatory = $false, HelpMessage = "Specify whether to create a new window for the executable.")]
+        [ValidateNotNull()]
+        [bool]$UseShellExecute = $false
     )
-
-    # Construct a hash-table for default parameter splatting
-    $SplatArgs = @{
-        FilePath = $FilePath
-        NoNewWindow = $true
-        Passthru = $true
-        ErrorAction = "Stop"
-    }
-
-    # Add ArgumentList param if present
-    if (-not([System.String]::IsNullOrEmpty($Arguments))) {
-        $SplatArgs.Add("ArgumentList", $Arguments)
-    }
-
-    # Invoke executable and wait for process to exit
     try {
-        $Invocation = Start-Process @SplatArgs
-        $Handle = $Invocation.Handle
-        $Invocation.WaitForExit()
+        # Create the Process Info object which contains details about the process
+        $ProcessStartInfoObject = New-object -TypeName "System.Diagnostics.ProcessStartInfo"
+        $ProcessStartInfoObject.FileName = $FilePath
+        $ProcessStartInfoObject.CreateNoWindow = $CreateNoWindow
+        $ProcessStartInfoObject.UseShellExecute = $UseShellExecute
+        $ProcessStartInfoObject.RedirectStandardOutput = $RedirectStandardOutput
+        $ProcessStartInfoObject.RedirectStandardError = $RedirectStandardError 
+        
+        # Add the arguments to the process info object
+        if ($Arguments.Count -gt 0) {
+            $ProcessStartInfoObject.Arguments = $Arguments
+        }
+
+        # Create the object that will represent the process
+        $Process = New-Object -TypeName "System.Diagnostics.Process"
+        $Process.StartInfo = $ProcessStartInfoObject
+
+        # Start process
+        [void]$Process.Start()
+        
+        # Wait for the process to exit
+        $Process.WaitForExit()
+
+        # Return an object that contains the exit code
+        return [PSCustomObject]@{
+            ExitCode = $Process.ExitCode
+        }
     }
     catch [System.Exception] {
-        Write-Warning -Message $_.Exception.Message; break
+        throw "$($MyInvocation.MyCommand): Error message: $($_.Exception.Message)"
     }
-
-    return $Invocation.ExitCode
 }
